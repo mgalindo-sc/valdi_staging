@@ -242,6 +242,28 @@ class BundleResourcesProcessor: CompilationProcessor {
             }
         }
         let logger = self.logger
+        let maxAttempts = 3
+        var attempt = 0
+        var retryDelay = 500.0
+        while (true) {
+            do {
+                let promise = try uploadArtifact(artifactUploader: artifactUploader, artifactName: artifactName, moduleData: moduleData, sha256Digest: sha256Digest)
+                return promise
+            } catch {
+                if (attempt >= maxAttempts) {
+                    return Promise(error: error)
+                }
+
+                logger.info("buildAndUpload attempt \(attempt) failed, waiting \(retryDelay)ms to retry")
+                Thread.sleep(forTimeInterval: (retryDelay / 1000.0))
+                retryDelay *= 2
+                attempt += 1
+            }
+        }
+    }
+
+    private func uploadArtifact(artifactUploader: ArtifactUploader, artifactName: String, moduleData: Data, sha256Digest: String) throws -> Promise<Valdi_DownloadableModuleArtifact> {
+        let logger = self.logger
         let artifactInfoPromise: Promise<ArtifactInfo>
         if let _ = self.projectConfig.preparedUploadArtifactOutput {
             artifactInfoPromise = artifactUploader.appendToPreparedArtifact(artifactName: artifactName, artifactData: moduleData, sha256: sha256Digest)
@@ -258,7 +280,7 @@ class BundleResourcesProcessor: CompilationProcessor {
 
             return artifact
         }.catch { (error) -> Error in
-            let errorMessage = "Failed to upload artifact '\(artifactName)': \(error.legibleLocalizedDescription)"
+            let errorMessage = "buildAndUpload failed to upload artifact '\(artifactName)': \(error.legibleLocalizedDescription)"
             logger.error(errorMessage)
             return CompilerError(errorMessage)
         }
